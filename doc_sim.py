@@ -347,7 +347,7 @@ if __name__ == "__main__":
 	n = len(texts_to_process)
 	similarity_matrix_colbert_semantic = np.zeros((n, n))
 
-	print("Calculating ColBERT-Semantic-Avg similarities (Query=Row, Doc=Col)...")
+	print("Calculating ColBERT-like-Semantic-Avg similarities (Query=Row, Doc=Col)...")
 	for i in range(n): # Query i
 		print(f"  Processing Query {i+1}/{n}...") # Progress indicator
 		for j in range(n): # Document j
@@ -370,8 +370,8 @@ if __name__ == "__main__":
 			)
 			similarity_matrix_colbert_semantic[i, j] = similarity_score
 
-	# Print the ColBERT-Semantic-Avg similarity matrix (Note: Asymmetric!)
-	print("\nDocument Similarity Matrix (ColBERT-Semantic-Avg, Query=Row, Doc=Col):")
+	# Print the ColBERT-like-Semantic-Avg similarity matrix (Note: Asymmetric!)
+	print("\nDocument Similarity Matrix (ColBERT-like-Semantic-Avg, Query=Row, Doc=Col):")
 	print("-" * 75)
 	print("      ", end="")
 	for j in range(n): print(f"Doc {j+1} ", end="\t")
@@ -381,16 +381,3 @@ if __name__ == "__main__":
 		for j in range(n):
 			print(f"{similarity_matrix_colbert_semantic[i, j]:.4f}", end="\t")
 		print()
-
-	# Print interpretations (highlighting asymmetry)
-	print("\nColBERT-Semantic-Avg Similarity Interpretations:")
-	print("-" * 75)
-	for i in range(n):
-		for j in range(n):
-			if i == j: continue
-			print(f"Query {i+1} -> Document {j+1}: {similarity_matrix_colbert_semantic[i, j]:.4f}")
-			# Optional: Print the reverse to show asymmetry
-			# print(f"Query {j+1} -> Document {i+1}: {similarity_matrix_colbert_semantic[j, i]:.4f}")
-			print(f"  - Query {i+1}:    {texts_to_process[i][:60]}...")
-			print(f"  - Document {j+1}: {texts_to_process[j][:60]}...")
-			print()
