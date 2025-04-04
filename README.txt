@@ -16,7 +16,7 @@ The system extracts token embeddings across multiple layers of a language model 
 - Provides batch processing functionality
 - Main functions:
   - `ModelManager.get_embeddings()`: Extract token embeddings across layers
-  - `process_batch()`: Process multiple texts with single model loading
+  - `process_batch()`: Process multiple texts with single model loading, can also do multiple documents at once given there is enough hardware support (memory)
 
 ### 2. `token_stopword_util.py`
 - Handles token filtering and indexing
