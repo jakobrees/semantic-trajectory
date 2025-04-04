@@ -1,7 +1,6 @@
 import numpy as np
 from typing import List, Dict, Tuple, Callable, Union, Generator
 import torch
-import time # For timing comparisons
 
 # Assume these imports exist and work as before:
 from dtw_util import dtw_embedding_similarity
@@ -28,7 +27,8 @@ def calculate_similarity_matrix(
 	trajectories1: List[List[Union[np.ndarray, torch.Tensor]]],
 	trajectories2: List[List[Union[np.ndarray, torch.Tensor]]],
 	similarity_metric: Callable,
-	distance_metric: str = "cosine"
+	distance_metric: str = "cosine",
+	similarity_threshold: float = 0.75,
 ) -> np.ndarray:
 	"""
 	Calculates the pairwise similarity matrix between two lists of embedding trajectories.
@@ -66,6 +66,9 @@ def calculate_similarity_matrix(
 						len(trajectories1_cpu[i]) + len(trajectories2_cpu[j]) + 1e-9
 					)
 					similarity = 1.0 / (1.0 + normalized_distance)
+
+					if similarity <= similarity_threshold:
+						similarity = 0.0
 
 			except Exception as e:
 				# print(f"Warning: Error in similarity_metric for traj pair ({i}, {j}): {e}. Setting similarity to 0.")
@@ -110,16 +113,8 @@ def max_similarity_aggregation(similarity_matrix: np.ndarray) -> float:
 		return 0.0
 
 	try:
-		if rows >= cols:
-			# If more rows than columns (or equal), find max in each row
-			max_similarities = np.max(similarity_matrix, axis=1)
-		else:
-			# If more columns than rows, find max in each column (ColBERT query-doc perspective)
-			# This matches the original ColBERT idea better: max over doc for each query item
-			max_similarities = np.max(similarity_matrix, axis=0) # Max per column (doc item)
-
-		# Check if max_similarities is empty before mean
-		return np.mean(max_similarities) if max_similarities.size > 0 else 0.0
+		max_similarities = np.max(similarity_matrix, axis=1) # max over rows (queries)
+		return np.mean(max_similarities)
 	except Exception as e:
 		# print(f"Error during max/mean calculation in max_similarity_aggregation: {e}")
 		return 0.0
@@ -188,6 +183,7 @@ def document_similarity_colbert_semantic_avg(
 	token_indices2: Dict[str, List[int]],
 	distance_metric: str = "cosine",
 	top_k_initial: int = 5,
+	similarity_threshold: float = 0.75,
 ) -> float:
 	"""
 	Modified version with prefiltering step using static embeddings
@@ -262,11 +258,12 @@ def document_similarity_colbert_semantic_avg(
 				if not doc_indices: continue
 				doc_trajectories = [embeddings2[idx] for idx in doc_indices]
 				
-				# DTW calculation remains the same
+				# DTW calculation
 				instance_similarity_matrix = calculate_similarity_matrix(
 					query_trajectories, doc_trajectories, 
 					similarity_metric=dtw_embedding_similarity,
-					distance_metric=distance_metric
+					distance_metric=distance_metric,
+					similarity_threshold = similarity_threshold,
 				)
 				token_type_similarity_score = max_similarity_aggregation(instance_similarity_matrix)
 				
@@ -310,8 +307,6 @@ if __name__ == "__main__":
 	
 	# --- Embedding Extraction ---
 	print("Extracting embeddings...")
-	# Make sure ModelManager is imported and works
-	# Make sure get_sorted_filtered_tokens handles raw tokens correctly
 	try:
 		with ModelManager(model_id="meta-llama/Llama-2-7b-hf") as manager:
 			for idx, text in enumerate(texts_to_process):
@@ -344,9 +339,7 @@ if __name__ == "__main__":
 	except NameError:
 		print("ERROR: ModelManager or get_sorted_filtered_tokens not defined.")
 		print("Please ensure necessary imports and definitions are available.")
-		# Add placeholder data if needed for testing rest of the script
-		# exit() # Or use placeholder data
-		raise # Re-raise the error if definitions are missing
+		exit()
 
 	print("Embedding extraction complete.")
 
@@ -372,7 +365,8 @@ if __name__ == "__main__":
 				embeddings2=all_embeddings[j],
 				sorted_tokens2=all_sorted_tokens[j],
 				token_indices2=all_token_indices[j],
-				top_k_initial=5
+				top_k_initial=5,
+				similarity_threshold=0.75,	# IN PRACTICE WE SHOULD LEARN THESE WITH ML FOR EACH POSSIBLE TOKEN!
 			)
 			similarity_matrix_colbert_semantic[i, j] = similarity_score
 
