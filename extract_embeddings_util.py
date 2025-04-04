@@ -110,6 +110,7 @@ class ModelManager:
 	def get_embeddings(self, 
 					   input_text: str, 
 					   max_layer_depth: Optional[int] = None,
+					   layer_step: int = 1,
 					   return_numpy: bool = False) -> Tuple[List[List[Any]], List[str]]:
 		"""
 		Extract token-wise embeddings across layers.
@@ -117,6 +118,8 @@ class ModelManager:
 		Args:
 			input_text: Text from which to extract tokens and embedding time series
 			max_layer_depth: Maximum layer depth to process (None = all layers)
+			layer_step: Step size for selecting layers (e.g., 1 = every layer,
+						2 = every second layer). Defaults to 1.
 			return_numpy: If True, return NumPy arrays instead of PyTorch tensors
 			
 		Returns:
@@ -125,10 +128,13 @@ class ModelManager:
 			
 		Raises:
 			RuntimeError: If model is not loaded
+			ValueError: If layer_step is not positive.
 		"""
 		if not self._is_loaded:
 			raise RuntimeError("Model not loaded. Call load_model() first.")
-
+		if layer_step <= 0:
+			raise ValueError("layer_step must be a positive integer.")
+		
 		# Tokenize input
 		inputs = self.tokenizer(input_text, return_tensors="pt")
 		input_ids = inputs["input_ids"]
@@ -151,13 +157,26 @@ class ModelManager:
 		num_layers = len(all_hidden_states)
 		sequence_length = input_ids.shape[1]
 		
-		# Determine which layers to process
-		if max_layer_depth is None or max_layer_depth >= num_layers:
-			layers_to_process = range(num_layers)
+		# Determine the effective maximum layer index to consider
+		# Layers are 0-indexed. max_layer_depth=10 means layers 0..10 (11 layers)
+		if max_layer_depth is None or max_layer_depth >= num_layers - 1:
+			# Process all available layers up to the last one
+			effective_stop_layer = num_layers
 		else:
-			layers_to_process = range(min(max_layer_depth + 1, num_layers))
-		
-		if DEBUG: print(f"Processing {len(layers_to_process)} layers of {num_layers} total")
+			# Process layers up to and including max_layer_depth
+			effective_stop_layer = min(max_layer_depth + 1, num_layers)
+
+		# Determine which layers to process using the step
+		# range(start, stop, step)
+		layers_to_process = range(0, effective_stop_layer, layer_step)
+
+		if DEBUG:
+			print(f"Total layers available (incl. embedding): {num_layers}")
+			print(f"Requested max_layer_depth: {max_layer_depth}")
+			print(f"Effective stop layer (exclusive for range): {effective_stop_layer}")
+			print(f"Layer step: {layer_step}")
+			print(f"Processing layers at indices: {list(layers_to_process)}")
+			print(f"Number of layers to extract per token: {len(list(layers_to_process))}")
 		
 		# Extract embeddings for each token across layers
 		token_embeddings = []
@@ -190,6 +209,7 @@ class ModelManager:
 def process_batch(model_manager: ModelManager, 
 				  texts: List[str], 
 				  max_layer_depth: Optional[int] = None,
+				  layer_step: int = 1,
 				  return_numpy: bool = False) -> List[Dict]:
 	"""
 	Process a batch of texts with a single model loading.
@@ -198,6 +218,7 @@ def process_batch(model_manager: ModelManager,
 		model_manager: Initialized ModelManager instance
 		texts: List of input texts to process
 		max_layer_depth: Maximum layer depth to process
+		layer_step: Step size for selecting layers (default: 1).
 		return_numpy: Whether to return NumPy arrays
 		
 	Returns:
@@ -214,6 +235,7 @@ def process_batch(model_manager: ModelManager,
 			embeddings, tokens = model_manager.get_embeddings(
 				input_text=text,
 				max_layer_depth=max_layer_depth,
+				layer_step=layer_step,
 				return_numpy=return_numpy
 			)
 			

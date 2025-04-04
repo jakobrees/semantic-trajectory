@@ -297,52 +297,10 @@ if __name__ == "__main__":
 		"what similarity laws must be obeyed when constructing aeroelastic models of heated high speed aircraft.",
 
 		# This is document 486 should be similar to query
-		"similarity laws for aerothermoelastic testing. the similarity laws for aerothermoelastic testing are \
-		presentedin the range. these are obtained bymaking nondimensional the appropriate governing equations \
-		ofthe individual external aerodynamic flow, heat conduction tothe interior, and stress-deflection \
-		problems which make up thecombined aerothermoelastic problem .  for the general aerothermoelastic \
-		model, where the model isplaced in a high-stagnation-temperature wind tunnel, similitudeis shown to \
-		be very difficult to achieve for a scale ratio otherthan unity .  the primary conflict occurs between \
-		thefree-stream mach number reynolds number aeroelasticparameter heat conduction parameter andthermal \
-		expansion parameter .  means of dealing with this basic conflict are presented .  theseinclude (1) \
-		looking at more specialized situations, such as thebehavior of wing structures and of thin solid plate \
-		lifting surfaces,and panel flutter, where the aerothermoelastic similarityparameters assume less \
-		restrictive forms, (2) the use of /incompleteaerothermoelastic/ testing in which the pressure and/or \
-		heatingrates are estimated in advance and applied artificially to themodel, and (3) the use of \
-		/restricted purpose/ modelsinvestigating separately one or another facet of the completeaerothermoelastic \
-		problem .  some numerical examples of modeling for the generalaerothermoelastic case as well as for the \
-		specialized situationsmentioned in (1) above are given .  finally, extension of the aerothermoelastic \
-		similarity laws tohigher speeds and temperatures is discussed .",
+		"similarity laws for aerothermoelastic testing. the similarity laws for aerothermoelastic testing are presentedin the range. these are obtained bymaking nondimensional the appropriate governing equations ofthe individual external aerodynamic flow, heat conduction tothe interior, and stress-deflection problems which make up thecombined aerothermoelastic problem. for the general aerothermoelastic model, where the model isplaced in a high-stagnation-temperature wind tunnel, similitudeis shown to be very difficult to achieve for a scale ratio otherthan unity. the primary conflict occurs between thefree-stream mach number reynolds number aeroelasticparameter heat conduction parameter andthermal expansion parameter. means of dealing with this basic conflict are presented. theseinclude (1) looking at more specialized situations, such as thebehavior of wing structures and of thin solid plate lifting surfaces,and panel flutter, where the aerothermoelastic similarityparameters assume less restrictive forms, (2) the use of /incompleteaerothermoelastic/ testing in which the pressure and/or heatingrates are estimated in advance and applied artificially to themodel, and (3) the use of /restricted purpose/ modelsinvestigating separately one or another facet of the completeaerothermoelastic problem. some numerical examples of modeling for the generalaerothermoelastic case as well as for the specialized situationsmentioned in (1) above are given. finally, extension of the aerothermoelastic similarity laws tohigher speeds and temperatures is discussed .",
 
 		# This is document 29: should be less similar to query than above
-		"a simple model study of transient temperature and thermal\
-		stress distribution due to aerodynamic heating .\
-		the present work is concerned with the determination of\
-		transient temperatures and thermal stresses in simple models intended\
-		to simulate parts or the whole of an aircraft structure of the built-\
-		up variety subjected to aerodynamic heating .\
-		the first case considered is that of convective heat transfer\
-		into one side of a flat plate, representing a thick skin, and the\
-		effect of the resulting temperature distribution in inducing\
-		thermal stresses associated with bending restraint at the plate edges .\
-		numerical results are presented for the transient temperature\
-		differentials in the plate when the environment temperature first\
-		increases linearly with time and then remains constant, the\
-		period of linear increase representing the time of acceleration of\
-		the aircraft .  corresponding thermal stress information is\
-		presented .\
-		the second case is that of the wide-flanged i-beam with\
-		convective heat transfer into the outer faces of the flanges .  numerical\
-		results are presented for transient temperature differentials for a\
-		wide range of values of the applicable parameters and for an\
-		environment temperature variation as described above .\
-		corresponding thermal stresses in a beam of infinite length are\
-		determined .  a theoretical analysis of the stress distribution in a beam\
-		of finite length is carried out and numerical results obtained for\
-		one case .  an experimental investigation of temperatures and\
-		stresses in such a beam is described, and results are presented\
-		which indicate good agreement with corresponding theoretical\
-		results .",
+		"a simple model study of transient temperature and thermal stress distribution due to aerodynamic heating. the present work is concerned with the determination of transient temperatures and thermal stresses in simple models intended to simulate parts or the whole of an aircraft structure of the built- up variety subjected to aerodynamic heating. the first case considered is that of convective heat transfer into one side of a flat plate, representing a thick skin, and the effect of the resulting temperature distribution in inducing thermal stresses associated with bending restraint at the plate edges. numerical results are presented for the transient temperature differentials in the plate when the environment temperature first increases linearly with time and then remains constant, the period of linear increase representing the time of acceleration of the aircraft. corresponding thermal stress information is presented. the second case is that of the wide-flanged i-beam with convective heat transfer into the outer faces of the flanges. numerical results are presented for transient temperature differentials for a wide range of values of the applicable parameters and for an environment temperature variation as described above. corresponding thermal stresses in a beam of infinite length are determined. a theoretical analysis of the stress distribution in a beam of finite length is carried out and numerical results obtained for one case. an experimental investigation of temperatures and stresses in such a beam is described, and results are presented which indicate good agreement with corresponding theoretical results.",
 	]
 	
 	# Initialize matrices for storing all embeddings and tokens
