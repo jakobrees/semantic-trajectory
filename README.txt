@@ -70,3 +70,8 @@ Several optimizations are used to make computation feasible:
 - Access to Hugging Face model hub
 
 (see requirements.txt for full list)
+
+## Future Improvements
+
+- Move Similarity Calculations to GPU
+- IDF for token weighting in final similarity weighting 

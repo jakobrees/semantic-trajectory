@@ -1,8 +1,6 @@
 import numpy as np
 from typing import List, Dict, Tuple, Callable, Union, Generator
 import torch
-
-# Assume these imports exist and work as before:
 from dtw_util import dtw_embedding_similarity
 from extract_embeddings_util import ModelManager
 from token_stopword_util import get_sorted_filtered_tokens
@@ -20,7 +18,6 @@ print(f"Using device: {DEVICE}")
 # ================= Document Similarity Functions =============================
 # =============================================================================
 
-# Keep calculate_similarity_matrix and max_similarity_aggregation as they are
 # They likely operate on CPU via numpy / dtw_util
 # calculate_similarity_matrix definition from previous code...
 def calculate_similarity_matrix(
@@ -77,7 +74,6 @@ def calculate_similarity_matrix(
 			similarity_matrix[i, j] = similarity
 	return similarity_matrix
 
-# max_similarity_aggregation definition from previous code...
 def max_similarity_aggregation(similarity_matrix: np.ndarray) -> float:
 	"""
 	Performs MaxSim aggregation on a similarity matrix.
@@ -118,59 +114,6 @@ def max_similarity_aggregation(similarity_matrix: np.ndarray) -> float:
 	except Exception as e:
 		# print(f"Error during max/mean calculation in max_similarity_aggregation: {e}")
 		return 0.0
-
-# --- New Helper Function for Representative Embeddings ---
-def get_representative_embeddings(
-	embeddings: List[List[torch.Tensor]], # Expects tensors now
-	sorted_tokens: List[str],
-	token_indices: Dict[str, List[int]],
-	layer_index: int = -1, # Use last layer by default
-	aggregation: str = "mean", # 'mean' or 'first' instance
-	device: torch.device = DEVICE
-) -> Dict[str, torch.Tensor]:
-	"""
-	Calculates a representative embedding for each unique token type.
-
-	Args:
-		embeddings: List[token_idx][layer_idx] -> torch.Tensor (on any device)
-		sorted_tokens: List of unique token strings.
-		token_indices: Dict mapping token string to list of indices in embeddings.
-		layer_index: The layer index to use for representation (-1 for last).
-		aggregation: How to aggregate embeddings if a token appears multiple times ('mean', 'first').
-		device: The torch device to put the representative embeddings on.
-
-	Returns:
-		Dict mapping token string to its representative torch.Tensor on the specified device.
-	"""
-	representatives = {}
-	for token in sorted_tokens:
-		indices = token_indices.get(token, [])
-		if not indices: continue
-
-		# Collect embeddings for the specified layer for all instances
-		instance_embeddings = []
-		for idx in indices:
-			if idx < len(embeddings) and layer_index < len(embeddings[idx]):
-				# Ensure the layer tensor is moved to the target device
-				instance_embeddings.append(embeddings[idx][layer_index].to(device))
-			# else: print(f"Warning: Index out of bounds for token '{token}' idx={idx} layer={layer_index}")
-
-
-		if not instance_embeddings: continue # Skip if no valid embeddings found
-
-		# Aggregate instance embeddings
-		if aggregation == "mean":
-			# Stack tensors and calculate mean along the instance dimension
-			stacked_embeddings = torch.stack(instance_embeddings, dim=0)
-			rep = torch.mean(stacked_embeddings, dim=0)
-		elif aggregation == "first":
-			rep = instance_embeddings[0]
-		else: # Default to mean
-			stacked_embeddings = torch.stack(instance_embeddings, dim=0)
-			rep = torch.mean(stacked_embeddings, dim=0)
-
-		representatives[token] = rep # rep is already on the target device
-	return representatives
 
 def document_similarity_colbert_semantic_avg(
 	# Query (Text 1)
