@@ -319,7 +319,8 @@ if __name__ == "__main__":
 				# Get embeddings (List[token][layer]) and raw tokens
 				embeddings, tokens_raw = manager.get_embeddings(
 					input_text=text,
-					max_layer_depth=15 # Using 15 layers
+					max_layer_depth=15, # Using 15 layers
+					layer_step=3
 				)
 
 				# Ensure embeddings and tokens align (handle BOS/EOS differences if any)
@@ -371,6 +372,7 @@ if __name__ == "__main__":
 				embeddings2=all_embeddings[j],
 				sorted_tokens2=all_sorted_tokens[j],
 				token_indices2=all_token_indices[j],
+				top_k_initial=5
 			)
 			similarity_matrix_colbert_semantic[i, j] = similarity_score
 
