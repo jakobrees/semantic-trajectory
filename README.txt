@@ -15,29 +15,29 @@ The system extracts token embeddings across multiple layers of a language model 
 - Handles extraction of token embeddings across specified layers
 - Provides batch processing functionality
 - Main functions:
-  - `ModelManager.get_embeddings()`: Extract token embeddings across layers
-  - `process_batch()`: Process multiple texts with single model loading, can also do multiple documents at once given there is enough hardware support (memory)
+	- `ModelManager.get_embeddings()`: Extract token embeddings across layers
+	- `process_batch()`: Process multiple texts with single model loading, can also do multiple documents at once given there is enough hardware support (memory)
 
 ### 2. `token_stopword_util.py`
 - Handles token filtering and indexing
 - Removes stopwords and punctuation from token lists
 - Main functions:
-  - `get_filtered_tokens()`: Filter tokens based on stopword lists
-  - `get_sorted_filtered_tokens()`: Returns sorted unique tokens and their indices
+	- `get_filtered_tokens()`: Filter tokens based on stopword lists
+	- `get_sorted_filtered_tokens()`: Returns sorted unique tokens and their indices
 
 ### 3. `dtw_util.py`
 - Implements the Dynamic Time Warping algorithm for embedding trajectory comparison
 - Main functions:
-  - `dtw_embedding_similarity()`: Compute DTW similarity between embedding trajectories
-  - `compare_token_trajectories()`: Compare trajectories of two specific tokens
+	- `dtw_embedding_similarity()`: Compute DTW similarity between embedding trajectories
+	- `compare_token_trajectories()`: Compare trajectories of two specific tokens
 
 ### 4. `doc_sim.py`
 - Main script demonstrating document similarity calculation
 - Implements the ColBERT-inspired semantic similarity method
 - Main functions:
-  - `document_similarity_colbert_semantic_avg()`: Calculate document similarity
-  - `calculate_similarity_matrix()`: Create pairwise similarity matrix
-  - `max_similarity_aggregation()`: Aggregate similarity scores
+	- `document_similarity_colbert_semantic_avg()`: Calculate document similarity
+	- `calculate_similarity_matrix()`: Create pairwise similarity matrix
+	- `max_similarity_aggregation()`: Aggregate similarity scores
 
 ### 5. `model_download.py`
 - Utility script to download the Llama-2-7b model from Hugging Face

@@ -1,9 +1,12 @@
 import numpy as np
-from typing import List, Dict, Tuple, Callable, Union, Generator
+from typing import List, Dict, Callable, Union, Optional
 import torch
+import pickle
 from dtw_util import dtw_embedding_similarity
-from extract_embeddings_util import ModelManager
+from  extract_embeddings_util import ModelManager
+from concurrent.futures import ThreadPoolExecutor
 from token_stopword_util import get_sorted_filtered_tokens
+import os
 
 # Check for MPS availability
 if torch.backends.mps.is_available():
@@ -14,64 +17,74 @@ else:
 	DEVICE = torch.device("cpu")
 print(f"Using device: {DEVICE}")
 
+
 # =============================================================================
 # ================= Document Similarity Functions =============================
 # =============================================================================
 
-# They likely operate on CPU via numpy / dtw_util
-# calculate_similarity_matrix definition from previous code...
 def calculate_similarity_matrix(
 	trajectories1: List[List[Union[np.ndarray, torch.Tensor]]],
 	trajectories2: List[List[Union[np.ndarray, torch.Tensor]]],
 	similarity_metric: Callable,
 	distance_metric: str = "cosine",
 	similarity_threshold: float = 0.75,
+	max_workers: int = None
 ) -> np.ndarray:
 	"""
-	Calculates the pairwise similarity matrix between two lists of embedding trajectories.
-	Applies normalization to DTW distance and converts to similarity within this function.
-	distance_metric: Distance metric to use ("euclidean", "cosine", "manhattan")
+	Calculates the pairwise similarity matrix using thread-based parallelism.
+	Thread-based approach avoids tokenizer forking issues.
 	"""
-	# Ensure data is on CPU if similarity_metric expects numpy/cpu
-	# This adds overhead if data was on GPU, but necessary if dtw_util is CPU-bound
+	# Use number of CPU cores if max_workers not specified
+	if max_workers is None:
+		max_workers = os.cpu_count() * 2  # Threads can be more numerous than cores
+	
+	# Ensure data is on CPU
 	trajectories1_cpu = [[layer.cpu().numpy() if isinstance(layer, torch.Tensor) else layer for layer in traj] for traj in trajectories1]
 	trajectories2_cpu = [[layer.cpu().numpy() if isinstance(layer, torch.Tensor) else layer for layer in traj] for traj in trajectories2]
-
+	
 	n = len(trajectories1_cpu)
 	m = len(trajectories2_cpu)
-	similarity_matrix = np.zeros((n, m)) # Result is numpy array on CPU
-
-	for i in range(n):
-		# Check if trajectory is empty after potential conversion issues
-		if not trajectories1_cpu[i]:
-			similarity_matrix[i, :] = 0.0
-			continue
-		for j in range(m):
-			if not trajectories2_cpu[j]:
-				similarity_matrix[i, j] = 0.0
-				continue
-			try:
-				raw_distance, _ = similarity_metric(
+	similarity_matrix = np.zeros((n, m))
+	
+	def compute_similarity(i, j):
+		"""Calculate a single similarity value"""
+		if not trajectories1_cpu[i] or not trajectories2_cpu[j]:
+			return i, j, 0.0
+			
+		try:
+			raw_distance, _ = similarity_metric(
 				trajectories1_cpu[i], trajectories2_cpu[j], distance_metric=distance_metric
-				)
-				# Simple check for invalid distance (e.g., NaN, Inf)
-				if not np.isfinite(raw_distance):
-					# print(f"Warning: Non-finite distance ({raw_distance}) encountered for traj pair ({i}, {j}). Setting similarity to 0.")
-					similarity = 0.0
-				else:
-					normalized_distance = raw_distance / (
-						len(trajectories1_cpu[i]) + len(trajectories2_cpu[j]) + 1e-9
-					)
-					similarity = 1.0 / (1.0 + normalized_distance)
-
-					if similarity <= similarity_threshold:
-						similarity = 0.0
-
-			except Exception as e:
-				# print(f"Warning: Error in similarity_metric for traj pair ({i}, {j}): {e}. Setting similarity to 0.")
-				similarity = 0.0 # Default to 0 similarity on error
-
+			)
+			
+			if not np.isfinite(raw_distance):
+				return i, j, 0.0
+				
+			normalized_distance = raw_distance / (
+				len(trajectories1_cpu[i]) + len(trajectories2_cpu[j]) + 1e-9
+			)
+			similarity = 1.0 / (1.0 + normalized_distance)
+			
+			if similarity <= similarity_threshold:
+				return i, j, 0.0
+			else:
+				return i, j, similarity
+				
+		except Exception as e:
+			return i, j, 0.0
+	
+	# Process with ThreadPoolExecutor
+	with ThreadPoolExecutor(max_workers=max_workers) as executor:
+		# Submit all tasks
+		futures = []
+		for i in range(n):
+			for j in range(m):
+				futures.append(executor.submit(compute_similarity, i, j))
+		
+		# Process results as they complete
+		for future in futures:
+			i, j, similarity = future.result()
 			similarity_matrix[i, j] = similarity
+
 	return similarity_matrix
 
 def max_similarity_aggregation(similarity_matrix: np.ndarray) -> float:
@@ -115,7 +128,46 @@ def max_similarity_aggregation(similarity_matrix: np.ndarray) -> float:
 		# print(f"Error during max/mean calculation in max_similarity_aggregation: {e}")
 		return 0.0
 
-def document_similarity_colbert_semantic_avg(
+# Global variables to store token weights after first load
+_TOKEN_WEIGHTS = {}
+_WEIGHTS_LOADED = False
+_WEIGHTS_FILEPATH = None
+_WEIGHT_TYPE = None
+
+def load_token_weights(weights_filepath: str, weight_type: str = "log_weights") -> Dict:
+	"""
+	Load token weights from a pickle file.
+	
+	Args:
+		weights_filepath: Path to the pickle file containing token weights
+		weight_type: Type of weight to use ('log_weights' or 'reciprocal_weights')
+		
+	Returns:
+		Dict containing token weights
+	"""
+	global _TOKEN_WEIGHTS, _WEIGHTS_LOADED, _WEIGHTS_FILEPATH, _WEIGHT_TYPE
+	
+	# If weights are already loaded from the same file and of the same type, reuse them
+	if _WEIGHTS_LOADED and _WEIGHTS_FILEPATH == weights_filepath and _WEIGHT_TYPE == weight_type:
+		return _TOKEN_WEIGHTS
+	
+	# Otherwise, load them from file
+	try:
+		with open(weights_filepath, 'rb') as f:
+			weight_data = pickle.load(f)
+			_TOKEN_WEIGHTS = weight_data.get(weight_type, {})
+			_WEIGHTS_LOADED = True
+			_WEIGHTS_FILEPATH = weights_filepath
+			_WEIGHT_TYPE = weight_type
+			# print(f"Loaded {len(_TOKEN_WEIGHTS)} token weights from {weights_filepath}")
+			return _TOKEN_WEIGHTS
+	except Exception as e:
+		print(f"Error loading token weights: {e}")
+		_WEIGHTS_LOADED = False
+		_TOKEN_WEIGHTS = {}
+		return {}
+
+def document_similarity_colbert_semantic_weighted(
 	# Query (Text 1)
 	embeddings1: List[List[Union[np.ndarray, torch.Tensor]]],
 	sorted_tokens1: List[str],
@@ -124,22 +176,41 @@ def document_similarity_colbert_semantic_avg(
 	embeddings2: List[List[Union[np.ndarray, torch.Tensor]]],
 	sorted_tokens2: List[str],
 	token_indices2: Dict[str, List[int]],
+	# Configuration
 	distance_metric: str = "cosine",
 	top_k_initial: int = 5,
 	similarity_threshold: float = 0.75,
+	weights_filepath: Optional[str] = None,
+	weight_type: str = "log_weights",  # 'log_weights' or 'reciprocal_weights'
+	fallback_weight: float = 21.5481  # Default weight for tokens not in dictionary
 ) -> float:
 	"""
-	Modified version with prefiltering step using static embeddings
-	to reduce DTW computation.
+	Enhanced version of document similarity that uses token frequency weights
+	to emphasize rarer tokens in the similarity calculation.
+	
+	Args:
+		embeddings1, sorted_tokens1, token_indices1: Query text representations
+		embeddings2, sorted_tokens2, token_indices2: Document text representations
+		distance_metric: Metric to use for embedding distance calculation
+		top_k_initial: Number of top document tokens to consider for DTW
+		similarity_threshold: Minimum similarity threshold
+		weights_filepath: Path to the pickle file containing token weights
+		weight_type: Type of weight to use ('log_weights' or 'reciprocal_weights')
+		fallback_weight: Weight to use for tokens not found in the dictionary
+		
+	Returns:
+		float: Weighted similarity score between query and document
 	"""
 	num_unique_query_tokens = len(sorted_tokens1)
 	if num_unique_query_tokens == 0:
 		return 0.0  # No query tokens to match
 	
-	total_max_token_type_similarity = 0.0
+	# Load token weights if filepath is provided (will use cached version if already loaded)
+	token_weights = {}
+	if weights_filepath:
+		token_weights = load_token_weights(weights_filepath, weight_type)
 	
-	# Get static embeddings for efficient pre-filtering
-	# We'll use the first layer embeddings as our "static" embeddings
+	# Extract static embeddings for pre-filtering
 	query_token_static_embeddings = {}
 	doc_token_static_embeddings = {}
 	
@@ -157,45 +228,79 @@ def document_similarity_colbert_semantic_avg(
 		# Use the first token instance and first layer as static representation
 		doc_token_static_embeddings[doc_token_type] = embeddings2[doc_indices[0]][0]
 	
+	# Store token similarities and their weights
+	token_similarities = []
+	total_weight = 0.0
+	weighted_sum = 0.0
+	
 	# Iterate through each unique token type in the QUERY (text1)
 	for query_token_type in sorted_tokens1:
-		max_sim_for_current_query_token = 0.0
 		query_indices = token_indices1.get(query_token_type, [])
 		if not query_indices: continue
-		query_trajectories = [embeddings1[idx] for idx in query_indices]
 		
-		if not sorted_tokens2:  # Handle empty document
-			max_sim_for_current_query_token = 0.0
-		else:
-			# Pre-filtering step: Calculate static embedding similarity
-			# and only do DTW for top-k most promising document tokens
+		# Get weight for this token (use fallback_weight if not found)
+		token_id = int(query_token_type) if query_token_type.isdigit() else query_token_type
+		token_weight = token_weights.get(token_id, fallback_weight)
+		
+		query_trajectories = [embeddings1[idx] for idx in query_indices]
+		max_sim_for_current_query_token = 0.0
+		
+		if sorted_tokens2:  # If document has tokens
+			# Pre-filtering step using static embeddings
 			query_static_emb = query_token_static_embeddings[query_token_type]
 			
-			# Calculate similarity with all document tokens
-			token_similarities = []
-			for doc_token_type in sorted_tokens2:
-				if doc_token_type not in doc_token_static_embeddings:
-					continue
+			# Handle both PyTorch and NumPy versions
+			if isinstance(query_static_emb, torch.Tensor):
+				# Move to GPU if available
+				device = torch.device("mps")  # Use Metal Performance Shaders on M3 Mac
+				query_emb = query_static_emb.to(device).unsqueeze(0)
+				
+				# Get all document embeddings at once
+				valid_tokens = [t for t in sorted_tokens2 if t in doc_token_static_embeddings]
+				if not valid_tokens:
+					top_k_tokens = []
+				else:
+					# Stack all document embeddings into a single tensor
+					doc_embs = torch.stack([doc_token_static_embeddings[t].to(device) for t in valid_tokens])
 					
-				doc_static_emb = doc_token_static_embeddings[doc_token_type]
+					# Calculate all similarities at once
+					similarities = torch.nn.functional.cosine_similarity(query_emb, doc_embs)
+					
+					# Get top-k indices and similarities
+					if len(similarities) <= top_k_initial:
+						top_indices = torch.argsort(similarities, descending=True)
+					else:
+						top_indices = torch.topk(similarities, k=top_k_initial).indices
+						
+					# Convert back to CPU for further processing
+					top_similarities = similarities[top_indices].cpu().tolist()
+					top_indices = top_indices.cpu().tolist()
+					
+					# Create result list
+					top_k_tokens = [(valid_tokens[idx], sim) for idx, sim in zip(top_indices, top_similarities)]
+			else:
+				# NumPy version (can also be optimized)
+				query_emb = np.array(query_static_emb).reshape(1, -1)
 				
-				# Calculate static embedding similarity (cosine)
-				if isinstance(query_static_emb, torch.Tensor) and isinstance(doc_static_emb, torch.Tensor):
-					cos_sim = torch.nn.functional.cosine_similarity(
-						query_static_emb.unsqueeze(0), 
-						doc_static_emb.unsqueeze(0)
-					).item()
-				else:  # numpy arrays
-					from scipy.spatial.distance import cosine
-					cos_sim = 1.0 - cosine(query_static_emb, doc_static_emb)
-				
-				token_similarities.append((doc_token_type, cos_sim))
+				valid_tokens = [t for t in sorted_tokens2 if t in doc_token_static_embeddings]
+				if not valid_tokens:
+					top_k_tokens = []
+				else:
+					# Stack all document embeddings
+					doc_embs = np.stack([doc_token_static_embeddings[t] for t in valid_tokens])
+					
+					# Calculate all similarities at once
+					# (1 - distance) is equivalent to cosine similarity
+					# Efficient dot product calculation for normalized vectors
+					similarities = np.dot(query_emb, doc_embs.T)[0]
+					
+					# Get top-k indices
+					top_indices = np.argsort(similarities)[::-1][:top_k_initial]
+					
+					# Create result list
+					top_k_tokens = [(valid_tokens[idx], similarities[idx]) for idx in top_indices]
 			
-			# Sort by similarity (descending) and take top_k_initial
-			token_similarities.sort(key=lambda x: x[1], reverse=True)
-			top_k_tokens = token_similarities[:min(top_k_initial, len(token_similarities))]
-			
-			# Now only perform DTW on the top-k most promising document tokens
+			# Perform DTW on the top-k most promising document tokens
 			for doc_token_type, _ in top_k_tokens:
 				doc_indices = token_indices2.get(doc_token_type, [])
 				if not doc_indices: continue
@@ -206,19 +311,26 @@ def document_similarity_colbert_semantic_avg(
 					query_trajectories, doc_trajectories, 
 					similarity_metric=dtw_embedding_similarity,
 					distance_metric=distance_metric,
-					similarity_threshold = similarity_threshold,
+					similarity_threshold=similarity_threshold,
 				)
 				token_type_similarity_score = max_similarity_aggregation(instance_similarity_matrix)
 				
 				if token_type_similarity_score > max_sim_for_current_query_token:
 					max_sim_for_current_query_token = token_type_similarity_score
 		
-		# Add to total
-		total_max_token_type_similarity += max_sim_for_current_query_token
+		# Store token similarity and its weight
+		token_similarities.append((query_token_type, max_sim_for_current_query_token, token_weight))
+		weighted_sum += max_sim_for_current_query_token * token_weight
+		total_weight += token_weight
 	
-	# Calculate average
-	average_max_similarity = total_max_token_type_similarity / num_unique_query_tokens
-	return average_max_similarity
+	# Calculate weighted average
+	if total_weight > 0:
+		weighted_avg_similarity = weighted_sum / total_weight
+	else:
+		weighted_avg_similarity = 0.0
+	
+	return weighted_avg_similarity
+
 
 # =============================================================================
 # =============================== Example Usage ===============================
@@ -299,7 +411,7 @@ if __name__ == "__main__":
 				continue
 
 			# Calculate similarity using the new function
-			similarity_score = document_similarity_colbert_semantic_avg(
+			similarity_score = document_similarity_colbert_semantic_weighted(
 				# Query Data (i)
 				embeddings1=all_embeddings[i],
 				sorted_tokens1=all_sorted_tokens[i],
@@ -309,7 +421,10 @@ if __name__ == "__main__":
 				sorted_tokens2=all_sorted_tokens[j],
 				token_indices2=all_token_indices[j],
 				top_k_initial=5,
-				similarity_threshold=0.75,	# IN PRACTICE WE SHOULD LEARN THESE WITH ML FOR EACH POSSIBLE TOKEN!
+				similarity_threshold=0.75,
+				weights_filepath="token_frequency_data/llama2_token_freq_weights.pkl",
+				weight_type="log_weights",
+				fallback_weight=21.5481  # Default weight for tokens not found in dictionary
 			)
 			similarity_matrix_colbert_semantic[i, j] = similarity_score
 
