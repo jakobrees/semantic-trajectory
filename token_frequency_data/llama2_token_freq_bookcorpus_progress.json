@@ -1,0 +1,10 @@
+{
+  "dataset_name": "bookcorpus",
+  "config_name": null,
+  "documents_processed": 74004228,
+  "total_tokens_processed": 1174059945,
+  "bytes_processed": 4539312250,
+  "gb_processed": 4.227563971653581,
+  "last_updated": 1743990317.533783,
+  "is_complete": true
+}

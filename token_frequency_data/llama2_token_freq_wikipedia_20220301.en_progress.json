@@ -1,0 +1,10 @@
+{
+  "dataset_name": "wikipedia",
+  "config_name": "20220301.en",
+  "documents_processed": 6458670,
+  "total_tokens_processed": 5530848514,
+  "bytes_processed": 19639001339,
+  "gb_processed": 18.29024528991431,
+  "last_updated": 1744002338.389416,
+  "is_complete": true
+}

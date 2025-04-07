@@ -1,0 +1,10 @@
+{
+  "dataset_name": "wikitext",
+  "config_name": "wikitext-103-raw-v1",
+  "documents_processed": 1165029,
+  "total_tokens_processed": 139335727,
+  "bytes_processed": 539295549,
+  "gb_processed": 0.502258119173348,
+  "last_updated": 1743988124.0151522,
+  "is_complete": true
+}
