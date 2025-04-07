@@ -1,0 +1,5 @@
+venv/
+doc_embeddings/
+__pycache__/
+archive/
+scan_reqs.py
