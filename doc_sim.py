@@ -17,6 +17,8 @@ else:
 	DEVICE = torch.device("cpu")
 print(f"Using device: {DEVICE}")
 
+# Will print out status of operations when true
+DEBUG = False
 
 # =============================================================================
 # ================= Document Similarity Functions =============================
@@ -100,11 +102,11 @@ def max_similarity_aggregation(similarity_matrix: np.ndarray) -> float:
 		float: MaxSim score (average of maximum similarities for each row).
 	"""
 	if not isinstance(similarity_matrix, np.ndarray):
-		 # print(f"Warning: max_similarity_aggregation received non-numpy input type {type(similarity_matrix)}. Converting.")
+		if DEBUG: print(f"Warning: max_similarity_aggregation received non-numpy input type {type(similarity_matrix)}. Converting.")
 		try:
 			similarity_matrix = np.array(similarity_matrix)
 		except Exception as e:
-			# print(f"Error converting input to numpy array in max_similarity_aggregation: {e}")
+			if DEBUG: print(f"Error converting input to numpy array in max_similarity_aggregation: {e}")
 			return 0.0
 
 	if similarity_matrix.size == 0:  # Handle empty matrix case
@@ -125,7 +127,7 @@ def max_similarity_aggregation(similarity_matrix: np.ndarray) -> float:
 		max_similarities = np.max(similarity_matrix, axis=1) # max over rows (queries)
 		return np.mean(max_similarities)
 	except Exception as e:
-		# print(f"Error during max/mean calculation in max_similarity_aggregation: {e}")
+		if DEBUG: print(f"Error during max/mean calculation in max_similarity_aggregation: {e}")
 		return 0.0
 
 # Global variables to store token weights after first load
@@ -159,7 +161,7 @@ def load_token_weights(weights_filepath: str, weight_type: str = "log_weights") 
 			_WEIGHTS_LOADED = True
 			_WEIGHTS_FILEPATH = weights_filepath
 			_WEIGHT_TYPE = weight_type
-			# print(f"Loaded {len(_TOKEN_WEIGHTS)} token weights from {weights_filepath}")
+			if DEBUG: print(f"Loaded {len(_TOKEN_WEIGHTS)} token weights from {weights_filepath}")
 			return _TOKEN_WEIGHTS
 	except Exception as e:
 		print(f"Error loading token weights: {e}")
@@ -201,6 +203,12 @@ def document_similarity_colbert_semantic_weighted(
 	Returns:
 		float: Weighted similarity score between query and document
 	"""
+	# Initialize static attributes for caching if they don't exist
+	if not hasattr(document_similarity_colbert_semantic_weighted, '_token_id_map'):
+		document_similarity_colbert_semantic_weighted._token_id_map = {}
+		document_similarity_colbert_semantic_weighted._last_weights_path = None
+		document_similarity_colbert_semantic_weighted._last_weight_type = None
+	
 	num_unique_query_tokens = len(sorted_tokens1)
 	if num_unique_query_tokens == 0:
 		return 0.0  # No query tokens to match
@@ -209,6 +217,40 @@ def document_similarity_colbert_semantic_weighted(
 	token_weights = {}
 	if weights_filepath:
 		token_weights = load_token_weights(weights_filepath, weight_type)
+	
+	# Create or update token-to-id mapping dictionary only if needed
+	if (weights_filepath and 
+		(document_similarity_colbert_semantic_weighted._last_weights_path != weights_filepath or
+		 document_similarity_colbert_semantic_weighted._last_weight_type != weight_type or
+		 not document_similarity_colbert_semantic_weighted._token_id_map)):
+		
+		# Create mapping between tokens and weight dictionary keys
+		token_id_map = {}
+		
+		# Process all unique tokens from both query and document
+		all_tokens = set()
+		all_tokens.update(sorted_tokens1)
+		all_tokens.update(sorted_tokens2)
+		
+		for token in all_tokens:
+			# Try different key formats in order of preference
+			if token in token_weights:
+				token_id_map[token] = token
+			elif isinstance(token, str) and token.isdigit() and int(token) in token_weights:
+				token_id_map[token] = int(token)
+			elif isinstance(token, str) and token.isdigit() and token in token_weights:
+				token_id_map[token] = token
+			else:
+				# Mark tokens that don't have a mapping
+				token_id_map[token] = None
+		
+		# Update the cached mapping
+		document_similarity_colbert_semantic_weighted._token_id_map = token_id_map
+		document_similarity_colbert_semantic_weighted._last_weights_path = weights_filepath
+		document_similarity_colbert_semantic_weighted._last_weight_type = weight_type
+	
+	# Use existing mapping if available
+	token_id_map = document_similarity_colbert_semantic_weighted._token_id_map
 	
 	# Extract static embeddings for pre-filtering
 	query_token_static_embeddings = {}
@@ -238,9 +280,9 @@ def document_similarity_colbert_semantic_weighted(
 		query_indices = token_indices1.get(query_token_type, [])
 		if not query_indices: continue
 		
-		# Get weight for this token (use fallback_weight if not found)
-		token_id = int(query_token_type) if query_token_type.isdigit() else query_token_type
-		token_weight = token_weights.get(token_id, fallback_weight)
+		# Get weight for this token using the mapping
+		token_id = token_id_map.get(query_token_type)
+		token_weight = token_weights.get(token_id, fallback_weight) if token_id is not None else fallback_weight
 		
 		query_trajectories = [embeddings1[idx] for idx in query_indices]
 		max_sim_for_current_query_token = 0.0

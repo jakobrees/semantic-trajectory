@@ -347,7 +347,8 @@ def process_batch(
 	batch_size: int = 4  # Number of texts to process simultaneously
 ) -> List[Dict]:
 	"""
-	Process a batch of texts with configurable processing efficiency.
+	Process a batch of texts with configurable processing efficiency. Note that 
+	this function is just a convenient wrapper for the `get_embeddings_batch` method.
 	
 	Args:
 		model_manager: Initialized ModelManager instance
