@@ -14,7 +14,7 @@ import gc
 DEBUG = False
 
 # =============================================================================
-# ==================== ModelManager Class & Batch Function ====================
+# =================== ModelManager Class & Batch Functions ====================
 # =============================================================================
 
 class ModelManager:
@@ -328,6 +328,254 @@ class ModelManager:
 		
 		return results
 
+	def get_embeddings_and_probs(self,
+								input_text: str, 
+								max_layer_depth: Optional[int] = None,
+								layer_step: int = 1,
+								return_numpy: bool = False) -> Tuple[List[List[Any]], List[str], List[Optional[float]]]:
+		"""
+		Extract token-wise embeddings across layers AND token probabilities.
+		
+		Args:
+			input_text: Text from which to extract tokens and embedding time series
+			max_layer_depth: Maximum layer depth to process (None = all layers)
+			layer_step: Step size for selecting layers (e.g., 1 = every layer,
+						2 = every second layer). Defaults to 1.
+			return_numpy: If True, return NumPy arrays instead of PyTorch tensors
+			
+		Returns:
+			- List of token embeddings [token_idx][layer_idx] -> embedding
+			- List of token strings in the same order
+			- List of token probabilities (None for the first token)
+			
+		Raises:
+			RuntimeError: If model is not loaded
+			ValueError: If layer_step is not positive.
+		"""
+		if not self._is_loaded:
+			raise RuntimeError("Model not loaded. Call load_model() first.")
+		if layer_step <= 0:
+			raise ValueError("layer_step must be a positive integer.")
+		
+		# Tokenize input
+		inputs = self.tokenizer(input_text, return_tensors="pt")
+		input_ids = inputs["input_ids"]
+		inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+		
+		# Get token strings
+		tokens = self.tokenizer.convert_ids_to_tokens(input_ids[0].tolist())
+		if DEBUG: print(f"Tokenized into {len(tokens)} tokens")
+		
+		# Forward pass with hidden states
+		with torch.no_grad():
+			outputs = self.model(
+				**inputs,
+				output_hidden_states=True,
+				return_dict=True
+			)
+		
+		# Process hidden states for embeddings
+		all_hidden_states = outputs.hidden_states
+		num_layers = len(all_hidden_states)
+		sequence_length = input_ids.shape[1]
+		
+		# Determine the effective maximum layer index to consider
+		if max_layer_depth is None or max_layer_depth >= num_layers - 1:
+			effective_stop_layer = num_layers
+		else:
+			effective_stop_layer = min(max_layer_depth + 1, num_layers)
+		
+		# Determine which layers to process using the step
+		layers_to_process = range(0, effective_stop_layer, layer_step)
+		
+		if DEBUG:
+			print(f"Total layers available (incl. embedding): {num_layers}")
+			print(f"Processing layers at indices: {list(layers_to_process)}")
+			print(f"Number of layers to extract per token: {len(list(layers_to_process))}")
+		
+		# Extract embeddings for each token across layers
+		token_embeddings = []
+		for token_idx in range(sequence_length):
+			# Get embeddings for this token across all requested layers
+			token_layers = []
+			for layer_idx in layers_to_process:
+				vector = all_hidden_states[layer_idx][0, token_idx, :]
+				
+				# Convert to NumPy or detach PyTorch tensor
+				if return_numpy:
+					vector = vector.detach().cpu().numpy()
+				else:
+					vector = vector.detach().cpu()
+					
+				token_layers.append(vector)
+			token_embeddings.append(token_layers)
+		
+		# Process logits to get token probabilities
+		logits = outputs.logits[0]  # Shape: [sequence_length, vocab_size]
+		probs = torch.softmax(logits, dim=-1)
+		
+		# Extract the probability for each token
+		token_probabilities = []
+		
+		# First token has no preceding context, so it has no probability
+		token_probabilities.append(None)
+		
+		# For tokens 1 to N, get the probability assigned by the previous position
+		for token_idx in range(1, sequence_length):
+			token_id = input_ids[0, token_idx].item()
+			prev_pos = token_idx - 1
+			token_prob = probs[prev_pos, token_id].item()  # Probability from previous position
+			token_probabilities.append(token_prob)
+		
+		return token_embeddings, tokens, token_probabilities
+
+	def get_embeddings_and_probs_batch(self, 
+								input_texts: List[str],
+								text_ids: Optional[List[str]] = None,
+								max_layer_depth: Optional[int] = None,
+								layer_step: int = 1,
+								return_numpy: bool = False) -> List[Dict]:
+		"""
+		Extract token-wise embeddings across layers AND token probabilities
+		for multiple texts in a single batch.
+		
+		Args:
+			input_texts: List of texts from which to extract tokens and embedding time series
+			text_ids: Optional list of IDs for each text. If None, indices will be used
+			max_layer_depth: Maximum layer depth to process (None = all layers)
+			layer_step: Step size for selecting layers (e.g., 1 = every layer,
+						2 = every second layer). Defaults to 1.
+			return_numpy: If True, return NumPy arrays instead of PyTorch tensors
+			
+		Returns:
+			List of dictionaries, one per text, each containing:
+				- text_id: ID of the text
+				- text: Original input text
+				- tokens: List of token strings
+				- embeddings: List of token embeddings [token_idx][layer_idx] -> embedding
+				- probabilities: List of token probabilities (None for first token)
+			
+		Raises:
+			RuntimeError: If model is not loaded
+			ValueError: If layer_step is not positive or text_ids length doesn't match input_texts
+		"""
+		if not self._is_loaded:
+			raise RuntimeError("Model not loaded. Call load_model() first.")
+		if layer_step <= 0:
+			raise ValueError("layer_step must be a positive integer.")
+		
+		# Generate text IDs if not provided
+		if text_ids is None:
+			text_ids = [str(i) for i in range(len(input_texts))]
+		elif len(text_ids) != len(input_texts):
+			raise ValueError("Number of text_ids must match number of input_texts")
+		
+		# Tokenize all inputs
+		batch_encoding = self.tokenizer(
+			input_texts,
+			padding=True,
+			truncation=True,
+			return_tensors="pt"
+		)
+		
+		# Move batch to the correct device
+		batch_encoding = {k: v.to(self.model.device) for k, v in batch_encoding.items()}
+		
+		# Get the attention mask to identify real tokens vs padding
+		attention_mask = batch_encoding["attention_mask"]
+		input_ids = batch_encoding["input_ids"]
+		
+		if DEBUG:
+			print(f"Processing batch of {len(input_texts)} texts")
+			print(f"Batch shape: {batch_encoding['input_ids'].shape}")
+		
+		# Forward pass with hidden states
+		with torch.no_grad():
+			outputs = self.model(
+				**batch_encoding,
+				output_hidden_states=True,
+				return_dict=True
+			)
+		
+		# Process hidden states
+		all_hidden_states = outputs.hidden_states
+		num_layers = len(all_hidden_states)
+		batch_size, max_seq_length = batch_encoding["input_ids"].shape
+		
+		# Determine the effective maximum layer index
+		if max_layer_depth is None or max_layer_depth >= num_layers - 1:
+			effective_stop_layer = num_layers
+		else:
+			effective_stop_layer = min(max_layer_depth + 1, num_layers)
+		
+		# Determine which layers to process using the step
+		layers_to_process = list(range(0, effective_stop_layer, layer_step))
+		
+		if DEBUG:
+			print(f"Total layers available (incl. embedding): {num_layers}")
+			print(f"Processing layers at indices: {layers_to_process}")
+			print(f"Number of layers to extract per token: {len(layers_to_process)}")
+		
+		# Get logits and convert to probabilities
+		logits = outputs.logits  # Shape: [batch_size, sequence_length, vocab_size]
+		probs = torch.softmax(logits, dim=-1)
+		
+		# Prepare results container
+		results = []
+		
+		# Process each text in the batch
+		for batch_idx in range(batch_size):
+			text_id = text_ids[batch_idx]
+			input_text = input_texts[batch_idx]
+			seq_ids = input_ids[batch_idx]
+			
+			# Get actual sequence length (excluding padding)
+			seq_length = attention_mask[batch_idx].sum().item()
+			
+			# Get token strings for this text
+			tokens = self.tokenizer.convert_ids_to_tokens(seq_ids[:seq_length].tolist())
+			
+			# Extract embeddings for each token across layers
+			token_embeddings = []
+			for token_idx in range(seq_length):
+				# Get embeddings for this token across all requested layers
+				token_layers = []
+				for layer_idx in layers_to_process:
+					vector = all_hidden_states[layer_idx][batch_idx, token_idx, :]
+					
+					# Convert to NumPy or detach PyTorch tensor
+					if return_numpy:
+						vector = vector.detach().cpu().numpy()
+					else:
+						vector = vector.detach().cpu()
+						
+					token_layers.append(vector)
+				token_embeddings.append(token_layers)
+			
+			# Extract probabilities for each token
+			token_probabilities = []
+			
+			# First token has no preceding context
+			token_probabilities.append(None)
+			
+			# For tokens 1 to N, get the probability assigned by the previous position
+			for token_idx in range(1, seq_length):
+				token_id = seq_ids[token_idx].item()
+				prev_pos = token_idx - 1
+				token_prob = probs[batch_idx, prev_pos, token_id].item()
+				token_probabilities.append(token_prob)
+			
+			# Add results for this text
+			results.append({
+				"text_id": text_id,
+				"text": input_text,
+				"tokens": tokens,
+				"embeddings": token_embeddings,
+				"probabilities": token_probabilities
+			})
+		
+		return results
+
 	def __enter__(self):
 		"""Enable context manager usage with 'with' statement."""
 		self.load_model()
@@ -344,7 +592,7 @@ def process_batch(
 	max_layer_depth: Optional[int] = 5,
 	layer_step: int = 1,
 	return_numpy: bool = False,
-	batch_size: int = 4  # Number of texts to process simultaneously
+	batch_size: int = 4
 ) -> List[Dict]:
 	"""
 	Process a batch of texts with configurable processing efficiency. Note that 
@@ -400,6 +648,67 @@ def process_batch(
 	
 	return results
 
+def process_batch_with_probs(
+	model_manager: ModelManager, 
+	texts: List[str],
+	text_ids: Optional[List[str]] = None, 
+	max_layer_depth: Optional[int] = 5,
+	layer_step: int = 1,
+	return_numpy: bool = False,
+	batch_size: int = 4
+) -> List[Dict]:
+	"""
+	Process a batch of texts extracting both embeddings and token probabilities
+	
+	Args:
+		model_manager: Initialized ModelManager instance
+		texts: List of input texts to process
+		text_ids: Optional list of IDs for each text. If None, indices will be used
+		max_layer_depth: Maximum layer depth to process
+		layer_step: Step size for selecting layers (default: 1)
+		return_numpy: Whether to return NumPy arrays
+		batch_size: Number of texts to process in a single forward pass
+	
+	Returns:
+		List of dictionaries with results for each text including token probabilities
+	"""
+	results = []
+	
+	# Generate text IDs if not provided
+	if text_ids is None:
+		text_ids = [str(i) for i in range(len(texts))]
+	elif len(text_ids) != len(texts):
+		raise ValueError("Number of text_ids must match number of texts")
+	
+	# Efficient processing with batched model loading
+	model_manager.load_model()
+	try:
+		# Process texts in batches
+		for batch_start in range(0, len(texts), batch_size):
+			batch_end = min(batch_start + batch_size, len(texts))
+			batch_texts = texts[batch_start:batch_end]
+			batch_ids = text_ids[batch_start:batch_end]
+			
+			if DEBUG:
+				print(f"\nProcessing batch {batch_start//batch_size + 1} "
+					f"(texts {batch_start+1}-{batch_end}/{len(texts)})")
+			
+			# Get embeddings and probabilities for the entire batch at once
+			batch_results = model_manager.get_embeddings_and_probs_batch(
+				input_texts=batch_texts,
+				text_ids=batch_ids,
+				max_layer_depth=max_layer_depth,
+				layer_step=layer_step,
+				return_numpy=return_numpy
+			)
+			
+			# Add batch results to overall results
+			results.extend(batch_results)
+	finally:
+		# Ensure model is unloaded after processing
+		model_manager.unload_model()
+	
+	return results
 
 # =============================================================================
 # =============================== Example Usage ===============================

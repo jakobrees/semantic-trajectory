@@ -3,7 +3,11 @@ doc_embeddings/
 __pycache__/
 archive/
 scan_reqs.py
-
+umap_models/
+test_doc_sim.py
+umap_train.py
+train/triples.train.small.tsv
+train/model_checkpoints/
 
 # macOS system files
 .DS_Store

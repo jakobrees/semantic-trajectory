@@ -138,33 +138,70 @@ _WEIGHT_TYPE = None
 
 def load_token_weights(weights_filepath: str, weight_type: str = "log_weights") -> Dict:
 	"""
-	Load token weights from a pickle file.
-	
+	Load token weights from a pickle file, correctly handling the nested
+	structure saved by token_freq.py.
+
 	Args:
-		weights_filepath: Path to the pickle file containing token weights
-		weight_type: Type of weight to use ('log_weights' or 'reciprocal_weights')
-		
+		weights_filepath: Path to the pickle file containing token weights.
+		weight_type: Type of weight to use ('log_weights' or 'reciprocal_weights').
+
 	Returns:
-		Dict containing token weights
+		Dict containing the requested token weights, or an empty dict if loading fails.
 	"""
 	global _TOKEN_WEIGHTS, _WEIGHTS_LOADED, _WEIGHTS_FILEPATH, _WEIGHT_TYPE
-	
+
 	# If weights are already loaded from the same file and of the same type, reuse them
 	if _WEIGHTS_LOADED and _WEIGHTS_FILEPATH == weights_filepath and _WEIGHT_TYPE == weight_type:
 		return _TOKEN_WEIGHTS
-	
+
 	# Otherwise, load them from file
+	if not os.path.exists(weights_filepath):
+		print(f"Error: Token weights file not found at {weights_filepath}")
+		_WEIGHTS_LOADED = False
+		_TOKEN_WEIGHTS = {}
+		return {}
+
 	try:
 		with open(weights_filepath, 'rb') as f:
-			weight_data = pickle.load(f)
-			_TOKEN_WEIGHTS = weight_data.get(weight_type, {})
-			_WEIGHTS_LOADED = True
-			_WEIGHTS_FILEPATH = weights_filepath
-			_WEIGHT_TYPE = weight_type
-			if DEBUG: print(f"Loaded {len(_TOKEN_WEIGHTS)} token weights from {weights_filepath}")
+			# Load the entire data structure from the pickle file
+			full_weight_data = pickle.load(f)
+
+			# Check if the loaded data is a dictionary and contains the requested weight_type key
+			if isinstance(full_weight_data, dict) and weight_type in full_weight_data:
+				# Extract the specific weight dictionary
+				weights_dict = full_weight_data[weight_type]
+
+				# Validate that the extracted part is also a dictionary
+				if isinstance(weights_dict, dict):
+					_TOKEN_WEIGHTS = weights_dict
+					_WEIGHTS_LOADED = True
+					_WEIGHTS_FILEPATH = weights_filepath
+					_WEIGHT_TYPE = weight_type
+					if DEBUG: print(f"Loaded {len(_TOKEN_WEIGHTS)} token weights ('{weight_type}') from {weights_filepath}")
+				else:
+					print(f"Error: Weight type '{weight_type}' in {weights_filepath} exists but is not a dictionary (Type: {type(weights_dict)}).")
+					_TOKEN_WEIGHTS = {}
+					_WEIGHTS_LOADED = False
+			else:
+				# Handle cases where the file might have a different structure or is missing the key
+				if isinstance(full_weight_data, dict):
+					print(f"Error: Weight file {weights_filepath} loaded, but does not contain the key '{weight_type}'. Available keys: {list(full_weight_data.keys())}")
+				else:
+					print(f"Error: Weight file {weights_filepath} did not load as a dictionary (Type: {type(full_weight_data)}). Cannot extract weights.")
+				_TOKEN_WEIGHTS = {}
+				_WEIGHTS_LOADED = False
+
 			return _TOKEN_WEIGHTS
+
+	except pickle.UnpicklingError:
+		print(f"Error: Could not unpickle file {weights_filepath}. It might be corrupted or not a valid pickle file.")
+		_WEIGHTS_LOADED = False
+		_TOKEN_WEIGHTS = {}
+		return {}
 	except Exception as e:
-		print(f"Error loading token weights: {e}")
+		print(f"Error loading token weights from {weights_filepath}: {e}")
+		import traceback
+		traceback.print_exc() # Print detailed traceback for unexpected errors
 		_WEIGHTS_LOADED = False
 		_TOKEN_WEIGHTS = {}
 		return {}
